@@ -1,0 +1,14 @@
+﻿modelo,configuracao_escolhida,RMSE_validacao_interna,configuracoes_testadas
+naive_ultimo_mes,{},30.266937735019525,1
+media_movel_3m,{},37.674546266023015,1
+naive_sazonal_12m,{},67.62155961138592,1
+ETS,"{'trend': None, 'seasonal': None, 'damped_trend': False}",32.59610989003026,3
+ARIMA,"{'order': (1, 1, 1)}",31.626750243222876,3
+SARIMA,"{'order': (1, 0, 0), 'seasonal_order': (1, 0, 0, 12)}",34.410772360344964,2
+Poisson_lags,"{'ridge_alpha': 0.05, 'link': 'log'}",56.928575885542614,4
+NegBin_lags,{'dispersion_alpha': 1.0},43.18954399524767,3
+INGARCH_Poisson,{},32.39839815851082,1
+INGARCH_NegBin,{},33.02491969104316,1
+Random_Forest,"{'max_depth': 3, 'min_samples_leaf': 3}",35.05001756753117,3
+Boosting_Poisson,"{'learning_rate': 0.05, 'max_iter': 150, 'max_leaf_nodes': 5}",35.28333735422061,2
+SVR,"{'C': 50.0, 'epsilon': 1.0}",38.60446501377561,3

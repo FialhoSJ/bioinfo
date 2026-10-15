@@ -24,11 +24,11 @@ Eu escolhi 50% inicial para desenvolvimento e 50% final para teste cronológico 
 
 No CSV atual há 237 meses completos, de janeiro de 2007 a setembro de 2026. Com 12 meses de histórico inicial, formam-se 225 alvos de um mês à frente. Como esse total é ímpar, a divisão mais próxima de metade reserva 112 alvos para desenvolvimento, até abril de 2017, e 113 para teste, de maio de 2017 a setembro de 2026. Assim, a metade inicial contém mais de nove anos de alvos: razoável para comparar modelos parcimoniosos, mas ainda pequena para justificar redes profundas ou modelos com muitos parâmetros. Outubro de 2026 foi excluído porque a última notificação do CSV é de 5 de outubro, logo o mês está incompleto.
 
-Na agregação atual, encontrei 30.249 linhas válidas de Breves-PA, 30.236 registros somados em 237 meses, nenhum mês sem linha que precisasse ser preenchido e nenhuma contagem mensal igual a zero. A média mensal é 127,6; a variância bruta é 18.768,8, cerca de 147 vezes a média. Essa razão bruta sugere forte dispersão e dá motivo para testar a binomial negativa, mas não prova por si só que o Poisson condicional seja inadequado: tendência, sazonalidade e mudanças ao longo de quase vinte anos também elevam a variância. Eu vou verificar isso com resíduos dos modelos ajustados.
+Na checagem da extração, encontrei 30.249 linhas válidas de Breves-PA e confirmei que todas têm `Número de registros = 1`. Treze linhas são de outubro de 2026, que foi excluído por estar parcial; assim, a série de janeiro de 2007 a setembro de 2026 soma 30.236 notificações em 237 meses completos. Não há lacunas mensais nem contagens mensais iguais a zero. A média mensal é 127,6; a variância bruta é 18.768,8, cerca de 147 vezes a média. Essa razão bruta sugere forte dispersão, mas não prova por si só que o Poisson condicional seja inadequado: tendência, sazonalidade e mudanças ao longo de quase vinte anos também elevam a variância. Avaliei dispersão com resíduos preditivos do INGARCH.
 
 No teste, eu avalio 113 previsões **mensais de um passo à frente**: para prever maio de 2017 uso somente dados anteriores a maio; depois que o valor real de maio estaria disponível, ele pode entrar no ajuste de junho. As configurações e hiperparâmetros ficam selecionados somente com validação temporal interna nos primeiros 112 alvos. Isso representa atualização operacional mensal. Não significa treinar uma vez e prever recursivamente todos os 113 meses sem observar os valores reais intermediários.
 
-Essa decisão é eficaz para responder a uma pergunta operacional de curto prazo e dá um teste extenso em diferentes períodos. Ela tem limites: a primeira metade tem mudanças de regime e talvez não represente a segunda; além disso, ao revisar repetidamente os resultados desse teste e alterar os modelos, o teste deixa de ser intocado. Por isso, eu trato este resultado como comparação exploratória forte, não confirmação final. Como análise de sensibilidade, posso executar `Teste2` com 70/30, mas não escolherei a fração que produza o melhor ranking; o protocolo primário permanece registrado como 50/50. A confirmação final ideal usará meses futuros ainda não examinados.
+Essa decisão é eficaz para responder a uma pergunta operacional de curto prazo e dá um teste extenso em diferentes períodos. Ela tem limites: a primeira metade tem mudanças de regime e talvez não represente a segunda; além disso, ao revisar repetidamente os resultados desse teste e alterar os modelos, o teste deixa de ser intocado. Por isso, trato o resultado como comparação exploratória forte, não confirmação final. Executei sensibilidades 60/40 e 70/30; as janelas se sobrepõem e não são replicações independentes. O protocolo primário permanece 50/50. A confirmação final ideal usará meses futuros ainda não examinados.
 
 ## O que comparei nesta versão
 
@@ -39,6 +39,7 @@ Todos os métodos recebem a mesma série-alvo agregada e são comparados nos mes
 | Baselines | último mês; média móvel de 3 meses; mesmo mês do ano anterior | Mostram o nível de desempenho que modelos complexos precisam superar. O gráfico antigo indica que o último mês já é um competidor forte. |
 | Suavização e séries temporais gaussianas | ETS/Holt-Winters; ARIMA; SARIMA | Comparam tendência e sazonalidade com métodos clássicos usados em previsões de malária. Os resultados de previsão são truncados em zero, mas estes modelos não são modelos de contagem. |
 | Regressão de contagem | Poisson e binomial negativa com defasagens 1, 3 e 12 e ciclo mensal | Produzem médias não negativas e modelam a distribuição de contagens. Poisson é referência; binomial negativa permite sobredispersão. |
+| Série temporal de contagem | INGARCH(1,1) sazonal com distribuição condicional Poisson e binomial negativa | Inclui a contagem anterior e a média condicional anterior na dinâmica da média; o intercepto tem harmônicos anuais e os coeficientes dinâmicos somam menos de 0,98. |
 | Aprendizado supervisionado | Random Forest; HistGradientBoosting com perda Poisson; SVR | Verificam se relações não lineares em defasagens e calendário ajudam com o volume de dados disponível. Eu interpreto esses modelos com cautela por haver só 112 alvos para desenvolvimento. |
 
 As entradas da etapa principal são contagens mensais defasadas (lag 1 = mês anterior; lag 12 = mesmo mês do ano anterior), médias móveis, tendência curta e seno/cosseno do mês do ano. Eu não uso sexo, faixa etária ou espécie como preditores nesta etapa: são partições contemporâneas da própria contagem e a data em que estariam disponíveis para uma previsão real ainda não foi estabelecida. Também não uso clima, população ou intervenções, ausentes ou ainda não alinhados no CSV atual.
@@ -77,6 +78,26 @@ O ranking do `Teste1` continua exploratório: usei um único corte histórico, e
 
 Para revisar os valores e as curvas, eu deixei a [tabela de métricas](../results/Teste1/metricas_por_metodo.csv), as [previsões do teste](../results/Teste1/previsoes_teste.csv), o [gráfico de RMSE](../results/Teste1/rmse_por_metodo.png) e o [gráfico de previsões](../results/Teste1/previsoes_teste.png) junto com as configurações e a validação interna.
 
+### Sensibilidade de janela e modelos temporais de contagem (`Teste2`–`Teste4`)
+
+| Execução | Desenvolvimento e teste | Melhor MAE | Melhor RMSE | Resultado dos métodos de referência |
+|---|---|---:|---:|---|
+| `Teste1` 50/50 | 112 alvos até 2017-04; teste 2017-05–2026-09 (113 meses) | SVR 24,71 | SVR 35,31 | Último mês: 27,07/37,18; SARIMA: 27,59/35,39. |
+| `Teste4` 60/40 | 135 alvos até 2019-03; teste 2019-04–2026-09 (90 meses) | SVR 21,92 | SVR 30,00 | Último mês: 23,72/31,76; SARIMA: 25,02/31,69. |
+| `Teste2` 70/30 | 157 alvos até 2021-01; teste 2021-02–2026-09 (68 meses) | ETS 23,18 | ETS 31,04 | SVR: 24,09/32,45; último mês: 24,15/32,78; SARIMA: 25,01/31,99. |
+
+Os pares de números são MAE/RMSE em casos. O ranking muda com o período: SVR lidera as métricas principais em 50/50 e 60/40, enquanto ETS lidera 70/30. A diferença pareada de MAE SVR menos último mês foi -2,36 casos no `Teste1` (IC95% [-5,82; 0,99]), -1,80 no `Teste4` ([-5,06; 1,65]) e -0,06 no `Teste2` ([-3,59; 3,94]); todos os intervalos incluem zero. Portanto, esses resultados não demonstram superioridade do SVR sobre o baseline. O SVR subestimou em média 6,44, 2,85 e 4,07 casos, respectivamente.
+
+No `Teste3`, acrescentei INGARCH Poisson e binomial negativa à comparação primária 50/50. O INGARCH-NB obteve MAE 27,66, RMSE 36,16 e deviance 12,63; o INGARCH-Poisson obteve 27,50, 36,43 e 12,75. O baseline do último mês teve 27,07/37,18 e deviance 13,80. Ambos os INGARCH reduziram RMSE e deviance frente ao baseline, mas tiveram MAE um pouco maior; os intervalos pareados de MAE incluíram zero. O SVR manteve o menor MAE/RMSE pontual e o SARIMA, a menor deviance.
+
+O INGARCH implementado usa
+\[\lambda_t = \exp(\gamma_0 + \gamma_s\sin(2\pi (m_t-1)/12) + \gamma_c\cos(2\pi (m_t-1)/12)) + \alpha Y_{t-1} + \beta\lambda_{t-1},\]
+com distribuição condicional Poisson ou NB2 e restrição `alpha + beta < 0,98`. O intercepto harmônico adiciona sazonalidade anual ao INGARCH(1,1); não é um GSARIMA. Nas 113 origens externas, todos os ajustes convergiram. A dispersão de Pearson foi 12,95 para Poisson e 0,99 para NB2; no NB2, a soma média dos coeficientes foi 0,916 (faixa 0,886–0,949), e o parâmetro de dispersão NB2 médio foi 0,151 (0,142–0,165). A ACF dos resíduos de Pearson no lag 12 foi 0,11 para NB2 e o Ljung–Box até lag 12 teve p=0,65. São verificações descritivas da previsão externa, sem uso para selecionar hiperparâmetros.
+
+Repeti o corte 60/40 com a semente 123 em `Teste4Semente123`. Como esperado, SVR, SARIMA, INGARCH e boosting produziram os mesmos valores; Random Forest variou de MAE/RMSE 23,79/31,76 com semente 42 para 23,95/32,17 com semente 123. Isso confirma que a mudança de semente afeta os métodos estocásticos, não o SVR determinístico. Os cortes continuam sobrepostos, portanto a análise é de sensibilidade temporal, e não um conjunto de testes independentes.
+
+As previsões e os diagnósticos por origem estão nas pastas [`Teste2`](../results/Teste2/), [`Teste3`](../results/Teste3/), [`Teste4`](../results/Teste4/) e [`Teste4Semente123`](../results/Teste4Semente123/). A tabela consolidada de métricas e diferenças pareadas está em [`results/sensibilidade_janelas.csv`](../results/sensibilidade_janelas.csv).
+
 ## O que ainda pode melhorar e quais métodos priorizar
 
 ### Prioridade 1 — qualidade e disponibilidade dos dados
@@ -89,7 +110,7 @@ Para revisar os valores e as curvas, eu deixei a [tabela de métricas](../result
 
 ### Prioridade 2 — candidatos estatísticos de contagem
 
-1. **GLARMA Poisson/binomial negativa** ou **INGARCH/INAR**: são meus próximos candidatos de maior prioridade porque modelam a dependência serial dentro de uma distribuição de contagem. O Poisson/NB GLM implementado usa casos defasados como covariáveis, mas não necessariamente remove toda a autocorrelação dos resíduos.
+1. **GLARMA Poisson/binomial negativa** ou **INAR**: próximos candidatos porque modelam dependência serial dentro de uma distribuição de contagem. Já avaliei INGARCH sazonal Poisson/NB; o INGARCH-Poisson permaneceu sobredisperso, enquanto o NB ficou próximo da dispersão nominal no teste.
 2. **GSARIMA/GARMA binomial negativa**, conforme Briët et al. (2013): representa sazonalidade e dependência temporal mantendo uma distribuição de contagem; precisa ser avaliado se a implementação e o tempo de ajuste forem viáveis.
 3. **Modelo Bayesiano dinâmico binomial negativo com tendência e sazonalidade**: permite propagar incerteza e acomodar mudanças graduais. Eu o priorizaria se a finalidade incluir intervalos preditivos para decisão de saúde pública.
 4. **GAM com resposta Poisson/NB**, e depois GAMBoost: permite sazonalidade e efeitos suaves; GAMBoost entra após confirmar estabilidade em validação temporal. O estudo de Sewe et al. motiva a experiência, mas seu melhor desempenho dependeu de dados ambientais que ainda não temos.
@@ -109,7 +130,9 @@ Eu usaria ajuste por máxima verossimilhança, penalização e validação tempo
 - `src/malaria_forecasting/`: leitura, agregação, modelos, avaliação e interface de linha de comando.
 - `data/raw/`: CSV fornecido; ignorado pelo Git por ser grande.
 - `results/Teste1/`: primeira comparação padrão 50/50.
-- `results/Teste2/`: espaço para comparação de sensibilidade, por exemplo 70/30.
+- `results/Teste2/`: comparação de sensibilidade 70/30.
+- `results/Teste3/`: comparação primária com INGARCH Poisson/NB e diagnósticos por origem.
+- `results/Teste4/` e `results/Teste4Semente123/`: corte 60/40 com sementes 42 e 123.
 - `results/legacy_optimizers/` e `results/legacy_hybrid/`: arquivos antigos preservados, sem misturá-los aos resultados novos.
 - `run.sh`: executa a CLI e escolhe um nome diferente para cada pasta.
 
@@ -119,6 +142,8 @@ Cada execução nova grava métricas, previsões mensais, configurações escolh
 
 - Briët OJT, Vounatsou P, Gunawardena DM, Galappaththy GNL, Amerasinghe PH. (2008). Models for short term malaria prediction in Sri Lanka. *Malaria Journal*, 7:76. [Texto integral](https://pmc.ncbi.nlm.nih.gov/articles/PMC2412896/).
 - Briët OJT, Amerasinghe PH, Vounatsou P. (2013). Generalized Seasonal Autoregressive Integrated Moving Average Models for Count Data with Application to Malaria Time Series with Low Case Numbers. *PLOS ONE*, 8(6):e65761. [DOI](https://doi.org/10.1371/journal.pone.0065761).
+- Ferland R, Latour A, Oraichi D. (2006). Integer-Valued GARCH Process. *Journal of Time Series Analysis*, 27(6):923–942. [DOI](https://doi.org/10.1111/j.1467-9892.2006.00496.x).
+- Zhu F. (2011). A negative binomial integer-valued GARCH model. *Journal of Time Series Analysis*, 32(1):54–67. [DOI](https://doi.org/10.1111/j.1467-9892.2010.00684.x).
 - Zinszer K, Verma AD, Charland K, et al. (2012). A scoping review of malaria forecasting: past work and future directions. *BMJ Open*, 2:e001992. [DOI](https://doi.org/10.1136/bmjopen-2012-001992).
 - Diao O, Absil P-A, Diallo M. (2023). Generalized Linear Models to Forecast Malaria Incidence in Three Endemic Regions of Senegal. *International Journal of Environmental Research and Public Health*, 20(13):6303. [DOI](https://doi.org/10.3390/ijerph20136303).
 - Sewe MO, Tozan Y, Ahlm C, Rocklöv J. (2017). Using remote sensing environmental data to forecast malaria incidence at a rural district hospital in Western Kenya. *Scientific Reports*, 7:2589. [DOI](https://doi.org/10.1038/s41598-017-02560-z).

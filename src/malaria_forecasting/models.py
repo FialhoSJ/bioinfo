@@ -54,6 +54,8 @@ def candidate_configurations() -> dict[str, list[dict[str, Any]]]:
             {"dispersion_alpha": 0.5},
             {"dispersion_alpha": 1.0},
         ],
+        "INGARCH_Poisson": [{}],
+        "INGARCH_NegBin": [{}],
         "Random_Forest": [
             {"max_depth": 3, "min_samples_leaf": 3},
             {"max_depth": 5, "min_samples_leaf": 3},
@@ -95,6 +97,8 @@ def forecast_one_step(
         return float(history.loc[seasonal_month])
     if method in {"ETS", "ARIMA", "SARIMA"}:
         return _forecast_statsmodels(method, config, history)
+    if method in {"INGARCH_Poisson", "INGARCH_NegBin"}:
+        return _forecast_ingarch(method, history)
 
     rows = supervised.loc[supervised.index < target_month].dropna(subset=["target"])
     if rows.empty:
@@ -233,6 +237,132 @@ def _forecast_count_glm(
             fitted = model.fit(maxiter=200)
         prediction = float(np.asarray(fitted.predict(x_test))[0])
     return max(0.0, prediction)
+
+
+def forecast_ingarch_with_diagnostics(
+    method: str,
+    history: pd.Series,
+) -> tuple[float, dict[str, float | bool | str]]:
+    """Forecast one month and return the fitted recursion diagnostics."""
+    return _forecast_ingarch(method, history, include_diagnostics=True)
+
+
+def _forecast_ingarch(
+    method: str,
+    history: pd.Series,
+    include_diagnostics: bool = False,
+) -> float | tuple[float, dict[str, float | bool | str]]:
+    """Fit a seasonal INGARCH(1,1) and forecast its next conditional mean.
+
+    The conditional mean follows
+    ``mu_t = omega_t + alpha * y_(t-1) + beta * mu_(t-1)``. The positive
+    intercept ``omega_t`` has a first annual harmonic, and alpha + beta is
+    constrained below one. The observation distribution is Poisson or NB2.
+    """
+    from scipy.optimize import minimize
+    from scipy.special import gammaln
+
+    counts = history.astype(float).sort_index()
+    observed = counts.to_numpy(dtype=float)
+    if len(observed) < 12 or not np.isfinite(observed).all() or (observed < 0).any():
+        raise ValueError("INGARCH requer pelo menos 12 contagens válidas e não negativas.")
+
+    months = counts.index.month.to_numpy(dtype=float)
+    phase = 2.0 * np.pi * (months - 1.0) / 12.0
+    sine = np.sin(phase)
+    cosine = np.cos(phase)
+    is_negative_binomial = method == "INGARCH_NegBin"
+
+    def unpack(
+        parameters: np.ndarray,
+    ) -> tuple[float, float, float, float, float, float | None]:
+        log_level, seasonal_sine, seasonal_cosine, raw_alpha, raw_beta = parameters[:5]
+        alpha_weight = np.exp(np.clip(raw_alpha, -30.0, 30.0))
+        beta_weight = np.exp(np.clip(raw_beta, -30.0, 30.0))
+        denominator = 1.0 + alpha_weight + beta_weight
+        alpha = 0.98 * alpha_weight / denominator
+        beta = 0.98 * beta_weight / denominator
+        dispersion = (
+            float(np.exp(np.clip(parameters[5], -12.0, 15.0)))
+            if is_negative_binomial else None
+        )
+        return float(log_level), float(seasonal_sine), float(seasonal_cosine), alpha, beta, dispersion
+
+    def conditional_means(parameters: np.ndarray) -> tuple[np.ndarray, float, float, float | None]:
+        log_level, seasonal_sine, seasonal_cosine, alpha, beta, dispersion = unpack(parameters)
+        log_intercept = log_level + seasonal_sine * sine + seasonal_cosine * cosine
+        intercept = np.exp(np.clip(log_intercept, -12.0, 15.0))
+        means = np.empty_like(observed)
+        means[0] = max(intercept[0] / (1.0 - alpha - beta), 1e-8)
+        for position in range(1, len(observed)):
+            means[position] = (
+                intercept[position]
+                + alpha * observed[position - 1]
+                + beta * means[position - 1]
+            )
+        return means, alpha, beta, dispersion
+
+    def negative_log_likelihood(parameters: np.ndarray) -> float:
+        means, _, _, dispersion = conditional_means(parameters)
+        means = np.clip(means, 1e-9, 1e12)
+        if is_negative_binomial:
+            assert dispersion is not None
+            size = 1.0 / dispersion
+            log_denominator = np.log(size + means)
+            log_probability = (
+                gammaln(observed + size)
+                - gammaln(size)
+                - gammaln(observed + 1.0)
+                + size * (np.log(size) - log_denominator)
+                + observed * (np.log(means) - log_denominator)
+            )
+        else:
+            log_probability = (
+                observed * np.log(means) - means - gammaln(observed + 1.0)
+            )
+        value = -float(np.sum(log_probability))
+        return value if np.isfinite(value) else 1e100
+
+    average = max(float(np.mean(observed)), 1e-3)
+    initial = [np.log(average * 0.8), 0.0, 0.0, -2.0, -2.0]
+    bounds = [(-5.0, 12.0), (-3.0, 3.0), (-3.0, 3.0), (-8.0, 8.0), (-8.0, 8.0)]
+    if is_negative_binomial:
+        initial.append(np.log(0.1))
+        bounds.append((-12.0, 15.0))
+
+    fitted = minimize(
+        negative_log_likelihood,
+        np.asarray(initial, dtype=float),
+        method="L-BFGS-B",
+        bounds=bounds,
+        options={"maxiter": 300, "ftol": 1e-9},
+    )
+    if not np.isfinite(fitted.fun) or not np.isfinite(fitted.x).all():
+        raise RuntimeError(f"A estimação {method} não encontrou parâmetros finitos.")
+
+    means, alpha, beta, dispersion = conditional_means(fitted.x)
+    next_month = counts.index[-1] + pd.offsets.MonthBegin(1)
+    next_phase = 2.0 * np.pi * (next_month.month - 1.0) / 12.0
+    log_level, seasonal_sine, seasonal_cosine, _, _, _ = unpack(fitted.x)
+    next_intercept = float(np.exp(np.clip(
+        log_level + seasonal_sine * np.sin(next_phase) + seasonal_cosine * np.cos(next_phase),
+        -12.0,
+        15.0,
+    )))
+    prediction = next_intercept + alpha * observed[-1] + beta * means[-1]
+    prediction = max(0.0, float(prediction))
+    if not include_diagnostics:
+        return prediction
+    diagnostics: dict[str, float | bool | str] = {
+        "alpha_lag_casos": float(alpha),
+        "beta_lag_media": float(beta),
+        "soma_alpha_beta": float(alpha + beta),
+        "dispersion_nb2": float(dispersion) if dispersion is not None else 0.0,
+        "log_verossimilhanca_condicional": -float(fitted.fun),
+        "otimizacao_convergiu": bool(fitted.success),
+        "mensagem_otimizacao": str(fitted.message),
+    }
+    return prediction, diagnostics
 
 
 def tune_model(

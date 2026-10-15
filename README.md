@@ -30,7 +30,7 @@ Cada execução cria `results/<nome>/` sem sobrescrever resultados existentes. E
 
 O padrão divide os 225 alvos mensais elegíveis em 112 para desenvolvimento e 113 para teste, em ordem temporal. A primeira metade seleciona as configurações por validação temporal interna; a segunda metade é avaliada com previsões mensais sucessivas de um mês à frente. Depois que o valor real de um mês estaria disponível, ele entra no histórico para prever o mês seguinte. Esse protocolo não é uma previsão recursiva de nove anos feita de uma só vez.
 
-Os métodos incluem baselines temporais, ETS, ARIMA/SARIMA, regressões Poisson e binomial negativa com defasagens de casos, Random Forest, boosting Poisson e SVR. O código exporta métricas, previsões, configurações, validação interna, comparação pareada e gráficos em cada pasta de teste.
+Os métodos incluem baselines temporais, ETS, ARIMA/SARIMA, regressões Poisson e binomial negativa com defasagens, INGARCH Poisson/NB sazonal, Random Forest, boosting Poisson e SVR. O código exporta métricas, previsões, configurações, validação interna, comparação pareada, gráficos e diagnósticos dos ajustes INGARCH em cada pasta de experimento.
 
 ## O que encontrei até aqui
 
@@ -38,4 +38,6 @@ Nos gráficos antigos `comparacao_metodos_*.png`, o baseline do último mês obt
 
 Na nova execução `Teste1`, o SVR obteve o menor MAE (24,71) e RMSE (35,31), mas a diferença pareada contra o baseline do último mês não foi conclusiva. O SARIMA teve RMSE quase igual (35,39) e a menor deviance de Poisson. A análise detalhada está na revisão metodológica.
 
-O protocolo, a revisão de artigos, as limitações dos dados e o plano de melhoria estão em [docs/revisao_e_protocolo.md](docs/revisao_e_protocolo.md). A interpretação detalhada dos gráficos antigos está em [analise_resultados_modelos.md](analise_resultados_modelos.md).
+As sensibilidades seguintes mudaram o ranking conforme a janela: ETS liderou MAE/RMSE em `Teste2` (70/30), e SVR liderou `Teste4` (60/40). Os intervalos pareados entre SVR e o baseline incluíram zero. Em `Teste3`, o INGARCH-NB teve dispersão de Pearson dos resíduos preditivos próxima de 1, mas não superou claramente o baseline em MAE. Essas análises não usam variáveis climáticas e as janelas de teste se sobrepõem.
+
+O protocolo, a revisão de artigos, as limitações dos dados e o plano de melhoria estão em [docs/revisao_e_protocolo.md](docs/revisao_e_protocolo.md), e o registro de execução está em [docs/proximos_passos.md](docs/proximos_passos.md). A interpretação detalhada dos gráficos antigos está em [analise_resultados_modelos.md](analise_resultados_modelos.md).
