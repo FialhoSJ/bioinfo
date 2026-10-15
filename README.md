@@ -1,6 +1,8 @@
-# Bioinfo — previsão mensal de malária
+# Previsão mensal de casos de malária em Breves (PA)
 
-Pesquisa de métodos de previsão mensal de registros autóctones de malária em Breves, Pará. A implementação compara algoritmos genéricos de busca (GA, PSO e Bat Algorithm), modelos preditivos (Random Forest, SVR e redes neurais) e baselines temporais. O método híbrido experimental foi retirado da avaliação atual.
+Neste projeto eu comparo métodos para prever a contagem mensal de registros autóctones de malária em Breves, Pará. A série usada nesta etapa contém notificações e não possui as covariáveis climáticas; por isso, os modelos recebem somente contagens passadas e mês do ano.
+
+Organizei o código em `src/malaria_forecasting/`, os dados de entrada em `data/raw/`, a revisão e o protocolo em `docs/`, e cada execução em uma pasta própria de `results/`. Os PNGs e CSVs anteriores foram mantidos em `results/legacy_optimizers/` e `results/legacy_hybrid/`; eles não são resultados da avaliação nova.
 
 ## Preparar o ambiente
 
@@ -10,54 +12,30 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-No VS Code/Jupyter, selecione o kernel **Python (.venv)**.
+Coloque o CSV indicado em [data/raw/README.md](data/raw/README.md). O arquivo bruto é ignorado pelo Git por seu tamanho.
 
-## Dados
-
-O código procura `6- Autóctones Mun Fx Etária e Sexo_Dados completos_data.csv` na pasta do projeto e em `~/Downloads`. Também é possível indicar outro caminho com `--data`. O arquivo de dados não é incluído neste repositório.
-
-A variável-alvo é a contagem mensal de registros notificados, sem denominador populacional. O reindexamento de meses sem registros como zero pressupõe ausência real de casos; essa hipótese precisa ser confirmada na fonte de vigilância. A disponibilidade, na origem da previsão, das contagens demográficas do mês de origem e os atrasos de notificação também precisam ser avaliados.
-
-## Protocolo principal
-
-O protocolo cobre alvos de 2008 ao último ano configurado (2026 por padrão). Os primeiros 60 meses elegíveis formam o treinamento inicial; assim, as métricas fora da amostra começam depois desses 60 meses. A avaliação externa avança em blocos de 12 meses e expande o treinamento a cada bloco. Dentro de cada bloco, a previsão é feita mês a mês, reajustando os modelos com os dados que já estariam observados.
-
-GA, PSO e BAT selecionam atributos e hiperparâmetros para o mesmo ensemble RF/SVR/PCA-ANN. Os três recebem a mesma população inicial e o mesmo número de indivíduos e iterações. O ensemble é comparado com Random Forest, SVR, uma rede PCA-MLP, a média de três redes e baselines de último mês, média móvel de três meses e mesmo mês do ano anterior. Os modelos isolados usam configurações de referência fixas e não devem ser interpretados como comparações de modelos igualmente ajustados.
-
-A busca usa somente os dados anteriores ao bloco avaliado, com três dobras temporais internas de 12 meses. Cada bloco externo é repetido com três sementes. São exportados os erros por bloco e semente, previsões mensais, convergência e diferenças pareadas contra o baseline do último mês. O ranking médio é descritivo; só o menor RMSE pontual não estabelece superioridade. Consulte o protocolo e as limitações em [analise_resultados_modelos.md](analise_resultados_modelos.md).
-
-## Executar a análise
-
-Com o ambiente ativado e o CSV disponível no projeto ou em `~/Downloads`:
+## Executar
 
 ```bash
-python3 hybrid_forecasting.py \
-  --start-year 2008 \
-  --end-year 2026 \
-  --initial-train-months 60 \
-  --outer-horizon 12 \
-  --repetitions 3 \
-  --cv-splits 3 \
-  --cv-test-months 12 \
-  --population-size 4 \
-  --iterations 3
+./run.sh Teste1
 ```
 
-O nome `hybrid_forecasting.py` foi mantido por compatibilidade com o projeto; o método híbrido anterior não está mais implementado na comparação. Use `--data /caminho/arquivo.csv` para especificar a fonte ou `--output /caminho/avaliacao.png` para escolher o painel principal. Reduzir as sementes ou o orçamento de busca diminui o custo, mas a configuração reduzida deve ser identificada como análise exploratória.
+Cada execução cria `results/<nome>/` sem sobrescrever resultados existentes. Exemplos:
 
-O módulo grava ao lado do painel:
+```bash
+./run.sh Teste2 --train-fraction 0.7
+./run.sh TesteRapido --quick
+./run.sh EstudoAlternativo --data /caminho/arquivo.csv --seed 123
+```
 
-- `avaliacao_diagnostica.png`: previsões, resíduos, convergência e comparação pareada;
-- `comparacao_metodos_*.png`: séries de previsões separadas por método;
-- `comparacao_otimizadores.png`: barras para GA, PSO e BAT;
-- `resultados_modelos.csv` e `metricas_agregadas.csv`: médias e dispersões das métricas;
-- `metricas_por_janela_semente.csv`: resultados de cada bloco externo e semente;
-- `previsoes_mensais.csv` e `previsoes_por_janela_semente.csv`;
-- `comparacoes_pareadas.csv`: diferença de erro absoluto vs. último mês e intervalo bootstrap em blocos de 12 meses;
-- `convergencia_otimizadores.csv` e `selecao_atributos_parametros.csv` para convergência e auditoria da busca.
+O padrão divide os 225 alvos mensais elegíveis em 112 para desenvolvimento e 113 para teste, em ordem temporal. A primeira metade seleciona as configurações por validação temporal interna; a segunda metade é avaliada com previsões mensais sucessivas de um mês à frente. Depois que o valor real de um mês estaria disponível, ele entra no histórico para prever o mês seguinte. Esse protocolo não é uma previsão recursiva de nove anos feita de uma só vez.
 
-O notebook [bioinfo.ipynb](bioinfo.ipynb) contém as fases exploratórias e o mesmo protocolo principal. A execução do notebook também grava esses arquivos no diretório de trabalho.
+Os métodos incluem baselines temporais, ETS, ARIMA/SARIMA, regressões Poisson e binomial negativa com defasagens de casos, Random Forest, boosting Poisson e SVR. O código exporta métricas, previsões, configurações, validação interna, comparação pareada e gráficos em cada pasta de teste.
 
-## Interpretação
+## O que encontrei até aqui
 
-MAE e RMSE são expressos em casos; valores menores são melhores. MASE compara o erro ao erro sazonal calculado somente no treinamento. Viés positivo indica superestimação. sMAPE/MAPE e correlação são métricas complementares. Uma diferença pareada negativa favorece o método sobre o último mês; intervalo que inclui zero não dá suporte claro a uma diferença. Como há várias comparações e dependência temporal, os intervalos são exploratórios e devem ser discutidos com cautela.
+Nos gráficos antigos `comparacao_metodos_*.png`, o baseline do último mês obteve MAE 25,8 e RMSE 35,6, menores que os valores mostrados para RF (28,9/39,9), média móvel de três meses (29,4/41,6), ensembles com GA/PSO/BAT, SVR e redes neurais. Portanto, naquele experimento, o baseline venceu os modelos mais complexos. Como esses artefatos vieram de outra configuração e não têm a divisão cronológica de 50/50 desta etapa, trato essa leitura como diagnóstico histórico, não como resultado final.
+
+Na nova execução `Teste1`, o SVR obteve o menor MAE (24,71) e RMSE (35,31), mas a diferença pareada contra o baseline do último mês não foi conclusiva. O SARIMA teve RMSE quase igual (35,39) e a menor deviance de Poisson. A análise detalhada está na revisão metodológica.
+
+O protocolo, a revisão de artigos, as limitações dos dados e o plano de melhoria estão em [docs/revisao_e_protocolo.md](docs/revisao_e_protocolo.md). A interpretação detalhada dos gráficos antigos está em [analise_resultados_modelos.md](analise_resultados_modelos.md).
